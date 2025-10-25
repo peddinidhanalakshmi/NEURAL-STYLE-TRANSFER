@@ -109,4 +109,7 @@ Style Image: A painting by Van Gogh
 Result: A cityscape that looks like it was painted in Van Gogh’s style.
 
 # Output 
+<img width="526" height="513" alt="Image" src="https://github.com/user-attachments/assets/5065f494-70bc-4a5e-83c8-f96e706f01cf" />
+
+<img width="521" height="509" alt="Image" src="https://github.com/user-attachments/assets/b1dce9d6-f764-4dbf-ac4a-1b6876ebdc3c" />
 
