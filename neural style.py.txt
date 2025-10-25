@@ -1,0 +1,127 @@
+# ----------------------------
+# Task 3 - Neural Style Transfer
+# ----------------------------
+
+# STEP 1: Install and Import Required Libraries
+!pip install torch torchvision pillow
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import transforms, models
+from PIL import Image
+import matplotlib.pyplot as plt
+
+#  STEP 2: Load and Preprocess Images
+def image_loader(image_name, imsize=512):
+    loader = transforms.Compose([
+        transforms.Resize((imsize, imsize)),
+        transforms.ToTensor()
+    ])
+    image = Image.open(image_name)
+    image = loader(image).unsqueeze(0)
+    return image.to(device, torch.float)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
+# 🔸 Upload your own images or use example URLs
+content_img_path = "https://pytorch.org/tutorials/_static/img/neural-style/picasso.jpg"  # style image
+style_img_path = "https://pytorch.org/tutorials/_static/img/neural-style/dancing.jpg"    # content image
+
+from urllib import request
+request.urlretrieve(content_img_path, "style.jpg")
+request.urlretrieve(style_img_path, "content.jpg")
+
+content_img = image_loader("content.jpg")
+style_img = image_loader("style.jpg")
+
+#  STEP 3: Display Images
+def imshow(tensor, title=None):
+    image = tensor.cpu().clone()
+    image = image.squeeze(0)
+    unloader = transforms.ToPILImage()
+    image = unloader(image)
+    plt.imshow(image)
+    if title:
+        plt.title(title)
+    plt.axis("off")
+    plt.show()
+
+imshow(content_img, title='Content Image')
+imshow(style_img, title='Style Image')
+
+# STEP 4: Define Loss Functions
+class ContentLoss(nn.Module):
+    def __init__(self, target):
+        super(ContentLoss, self).__init__()
+        self.target = target.detach()
+    def forward(self, input):
+        self.loss = nn.functional.mse_loss(input, self.target)
+        return input
+
+def gram_matrix(input):
+    a, b, c, d = input.size()
+    features = input.view(a * b, c * d)
+    G = torch.mm(features, features.t())
+    return G.div(a * b * c * d)
+
+class StyleLoss(nn.Module):
+    def __init__(self, target_feature):
+        super(StyleLoss, self).__init__()
+        self.target = gram_matrix(target_feature).detach()
+    def forward(self, input):
+        G = gram_matrix(input)
+        self.loss = nn.functional.mse_loss(G, self.target)
+        return input
+
+#  STEP 5: Load Pretrained VGG19
+cnn = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features.to(device).eval()
+cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
+cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).to(device)
+
+class Normalization(nn.Module):
+    def __init__(self, mean, std):
+        super(Normalization, self).__init__()
+        self.mean = torch.tensor(mean).view(-1, 1, 1)
+        self.std = torch.tensor(std).view(-1, 1, 1)
+    def forward(self, img):
+        return (img - self.mean) / self.std
+
+#  STEP 6: Build Model with Loss Layers
+content_layers = ['conv_4']
+style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+
+normalization = Normalization(cnn_normalization_mean, cnn_normalization_std).to(device)
+content_losses = []
+style_losses = []
+
+model = nn.Sequential(normalization)
+i = 0
+for layer in cnn.children():
+    if isinstance(layer, nn.Conv2d):
+        i += 1
+        name = f'conv_{i}'
+    elif isinstance(layer, nn.ReLU):
+        name = f'relu_{i}'
+        layer = nn.ReLU(inplace=False)
+    elif isinstance(layer, nn.MaxPool2d):
+        name = f'pool_{i}'
+    else:
+        name = f'other_{i}'
+
+    model.add_module(name, layer)
+
+    if name in content_layers:
+        target = model(content_img).detach()
+        content_loss = ContentLoss(target)
+        model.add_module(f"content_loss_{i}", content_loss)
+        content_losses.append(content_loss)
+
+    if name in style_layers:
+        target_feature = model(style_img).detach()
+        style_loss = StyleLoss(target_feature)
+        model.add_module(f"style_loss_{i}", style_loss)
+        style_losses.append(style_loss)
+
+# Trim the layers after last content and style loss
